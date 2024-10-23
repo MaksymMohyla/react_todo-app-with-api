@@ -13,10 +13,12 @@ export const App: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   // for showing loading overlay while adding todo
   const [tempTodo, setTempTodo] = useState<Todo | null>(null);
-  // for redacting todo (probably won't need it in future)
-  const [selectedTodo] = useState<Todo | null>(null);
   // for input disabling
   const [isTodoLoading, setIsTodoLoading] = useState(false);
+  // for showing loading overlay while deleting or updating todo
+  const [loadingTodoId, setLoadingTodoId] = useState(0);
+  // for redacting todos
+  const [selectedTodo, setSelectedTodo] = useState<Todo | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState('');
 
   //#region effects
@@ -81,6 +83,13 @@ export const App: React.FC = () => {
   useEffect(() => {
     titleRef.current?.focus();
   }, [todos, isTodoLoading, tempTodo]);
+
+  // the same for redacting input
+  const redactingInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    redactingInputRef.current?.focus();
+  }, [selectedTodo]);
   //#endregion
 
   //#region add Todos
@@ -135,9 +144,6 @@ export const App: React.FC = () => {
   //#endregion
 
   //#region delete Todos and clear completed todos
-  // for showing loading overlay while deleting todo
-  const [loadingTodoId, setLoadingTodoId] = useState(0);
-
   function deleteTodos(todoId: Todo['id']) {
     setLoadingTodoId(todoId);
     todoService
@@ -172,6 +178,153 @@ export const App: React.FC = () => {
   }
   //#endregion
 
+  //#region toggle Todos
+  function toggleTodo(currentTodo: Todo) {
+    setLoadingTodoId(currentTodo.id);
+    todoService
+      // should send request with changed value using patch method
+      .updateTodo({ ...currentTodo, completed: !currentTodo.completed })
+      .then(() => {
+        // eslint-disable-next-line no-param-reassign
+        currentTodo.completed = !currentTodo.completed;
+        // second varian, also works
+        // setTodos(currTodos =>
+        //   currTodos.map(todo =>
+        //     todo.id === currentTodo.id
+        //       ? { ...todo, completed: !todo.completed }
+        //       : todo,
+        //   ),
+        // );
+      })
+      .catch(error => {
+        setErrorMessage('Unable to update a todo');
+        throw error;
+      })
+      .finally(() => {
+        setLoadingTodoId(0);
+      });
+  }
+
+  function toggleAll() {
+    // different behaviour when all todos completed
+    const areAllCompleted = todos.every(t => t.completed);
+    const notCompletedTodos = todos.filter(t => !t.completed);
+
+    if (areAllCompleted) {
+      // individual request for every todo
+      todos.forEach(todo => {
+        setLoadingTodoId(todo.id);
+        todoService
+          // if all completed just invert them
+          .updateTodo({ ...todo, completed: false })
+          .then(() => {
+            setTodos(currTodos =>
+              currTodos.map(currTodo =>
+                currTodo.id === todo.id
+                  ? { ...currTodo, completed: false }
+                  : currTodo,
+              ),
+            );
+          })
+          .catch(error => {
+            setErrorMessage('Unable to update a todo');
+            throw error;
+          })
+          .finally(() => {
+            setLoadingTodoId(0);
+          });
+      });
+    } else {
+      notCompletedTodos.forEach(todo => {
+        setLoadingTodoId(todo.id);
+        todoService
+          // if some not completed, make all to be completed
+          .updateTodo({ ...todo, completed: true })
+          .then(() => {
+            setTodos(currTodos =>
+              currTodos.map(currTodo =>
+                currTodo.id === todo.id
+                  ? { ...currTodo, completed: true }
+                  : currTodo,
+              ),
+            );
+          })
+          .catch(error => {
+            setErrorMessage('Unable to update a todo');
+            throw error;
+          })
+          .finally(() => {
+            setLoadingTodoId(0);
+          });
+      });
+    }
+  }
+  //#endregion
+
+  //#region rename Todo
+  const [redactingQuery, setRedactingQuery] = useState(selectedTodo?.title);
+
+  function handleSelectTodoSpan(ev: React.MouseEvent<HTMLSpanElement>) {
+    const selectedTodoTitle = ev.currentTarget.textContent;
+
+    setRedactingQuery(selectedTodoTitle?.trim());
+
+    setSelectedTodo(todos.find(t => t.title === selectedTodoTitle));
+  }
+
+  function handleEscape(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      setSelectedTodo(undefined);
+      redactingInputRef.current?.blur();
+      titleRef.current?.focus();
+    }
+  }
+
+  document.addEventListener('keyup', handleEscape);
+
+  function handleTitleChange(todoToUpdate: Todo) {
+    if (todoToUpdate.title.trim() === redactingQuery?.trim()) {
+      setSelectedTodo(undefined);
+      redactingInputRef.current?.blur();
+      titleRef.current?.focus();
+
+      return;
+    }
+
+    setLoadingTodoId(todoToUpdate.id);
+
+    todoService
+      .updateTodo({
+        ...todoToUpdate,
+        title: redactingQuery?.trim(),
+      })
+      .then(updatedTodo => {
+        if (!updatedTodo.title) {
+          setLoadingTodoId(0);
+          deleteTodos(updatedTodo.id);
+
+          return;
+        }
+
+        return setTodos(currTodos =>
+          currTodos.map(todo =>
+            todo.id === updatedTodo.id ? updatedTodo : todo,
+          ),
+        );
+      })
+      .catch(error => {
+        setErrorMessage('Unable to update a todo');
+        throw error;
+      })
+      .finally(() => setLoadingTodoId(0));
+  }
+
+  function handleTitleChangeSubmit(ev: React.FormEvent) {
+    ev.preventDefault();
+    handleTitleChange(selectedTodo);
+  }
+  //#endregion
+
   //#region user warning
   if (!todoService.USER_ID) {
     return <UserWarning />;
@@ -192,6 +345,7 @@ export const App: React.FC = () => {
                 active: todos.every(todo => todo.completed),
               })}
               data-cy="ToggleAllButton"
+              onClick={() => toggleAll()}
             />
           )}
 
@@ -226,22 +380,32 @@ export const App: React.FC = () => {
                     type="checkbox"
                     className="todo__status"
                     checked={todo.completed}
+                    onChange={() => toggleTodo(todo)}
                   />
                 </label>
 
-                {selectedTodo ? (
-                  <form>
+                {selectedTodo === todo ? (
+                  <form
+                    onSubmit={handleTitleChangeSubmit}
+                    onBlur={handleTitleChangeSubmit}
+                  >
                     <input
+                      ref={redactingInputRef}
                       data-cy="TodoTitleField"
                       type="text"
                       className="todo__title-field"
                       placeholder="Empty todo will be deleted"
-                      value="Todo is being edited now"
+                      value={redactingQuery}
+                      onChange={ev => setRedactingQuery(ev.target.value)}
                     />
                   </form>
                 ) : (
                   <>
-                    <span data-cy="TodoTitle" className="todo__title">
+                    <span
+                      data-cy="TodoTitle"
+                      className="todo__title"
+                      onDoubleClick={handleSelectTodoSpan}
+                    >
                       {todo.title}
                     </span>
                     {/* already shown only on hover */}
