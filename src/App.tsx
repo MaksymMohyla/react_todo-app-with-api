@@ -187,14 +187,6 @@ export const App: React.FC = () => {
       .then(() => {
         // eslint-disable-next-line no-param-reassign
         currentTodo.completed = !currentTodo.completed;
-        // second varian, also works
-        // setTodos(currTodos =>
-        //   currTodos.map(todo =>
-        //     todo.id === currentTodo.id
-        //       ? { ...todo, completed: !todo.completed }
-        //       : todo,
-        //   ),
-        // );
       })
       .catch(error => {
         setErrorMessage('Unable to update a todo');
@@ -213,16 +205,17 @@ export const App: React.FC = () => {
     if (areAllCompleted) {
       // individual request for every todo
       todos.forEach(todo => {
+        // start loading
         setLoadingTodoId(todo.id);
         todoService
           // if all completed just invert them
           .updateTodo({ ...todo, completed: false })
-          .then(() => {
+          // receive request as changed todo
+          .then(updatedTodo => {
             setTodos(currTodos =>
+              // iterate through todos and replace all todos with changed values
               currTodos.map(currTodo =>
-                currTodo.id === todo.id
-                  ? { ...currTodo, completed: false }
-                  : currTodo,
+                currTodo.id === todo.id ? updatedTodo : currTodo,
               ),
             );
           })
@@ -235,17 +228,15 @@ export const App: React.FC = () => {
           });
       });
     } else {
+      // iterate only through not completed todos to make them completed
       notCompletedTodos.forEach(todo => {
         setLoadingTodoId(todo.id);
         todoService
-          // if some not completed, make all to be completed
           .updateTodo({ ...todo, completed: true })
-          .then(() => {
+          .then(updatedTodo => {
             setTodos(currTodos =>
               currTodos.map(currTodo =>
-                currTodo.id === todo.id
-                  ? { ...currTodo, completed: true }
-                  : currTodo,
+                currTodo.id === todo.id ? updatedTodo : currTodo,
               ),
             );
           })
@@ -264,14 +255,17 @@ export const App: React.FC = () => {
   //#region rename Todo
   const [redactingQuery, setRedactingQuery] = useState(selectedTodo?.title);
 
+  // this function will work upon double click on todo span
   function handleSelectTodoSpan(ev: React.MouseEvent<HTMLSpanElement>) {
     const selectedTodoTitle = ev.currentTarget.textContent;
 
     setRedactingQuery(selectedTodoTitle?.trim());
 
+    // find todo with the same title to set it to selected
     setSelectedTodo(todos.find(t => t.title === selectedTodoTitle));
   }
 
+  // for closing form upon pressing ESC
   function handleEscape(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       setSelectedTodo(undefined);
@@ -283,6 +277,7 @@ export const App: React.FC = () => {
   document.addEventListener('keyup', handleEscape);
 
   function handleTitleChange(todoToUpdate: Todo) {
+    // if title hasn't change revert all changes
     if (todoToUpdate.title.trim() === redactingQuery?.trim()) {
       setSelectedTodo(undefined);
       redactingInputRef.current?.blur();
@@ -291,14 +286,18 @@ export const App: React.FC = () => {
       return;
     }
 
+    // start loading
     setLoadingTodoId(todoToUpdate.id);
 
     todoService
+      // we send request on server with changed title
       .updateTodo({
         ...todoToUpdate,
         title: redactingQuery?.trim(),
       })
+      // and receive answer from server as changed todo
       .then(updatedTodo => {
+        // if title is empty delete todo
         if (!updatedTodo.title) {
           setLoadingTodoId(0);
           deleteTodos(updatedTodo.id);
@@ -306,6 +305,7 @@ export const App: React.FC = () => {
           return;
         }
 
+        // replace changed todo and don't touch the others
         return setTodos(currTodos =>
           currTodos.map(todo =>
             todo.id === updatedTodo.id ? updatedTodo : todo,
@@ -316,9 +316,11 @@ export const App: React.FC = () => {
         setErrorMessage('Unable to update a todo');
         throw error;
       })
+      // end loading anyway
       .finally(() => setLoadingTodoId(0));
   }
 
+  // this will work upon submit (enter) and blur (tab)
   function handleTitleChangeSubmit(ev: React.FormEvent) {
     ev.preventDefault();
     handleTitleChange(selectedTodo);

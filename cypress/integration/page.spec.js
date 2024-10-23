@@ -2,8 +2,6 @@
 
 import mixedTodos from '../fixtures/todos.json';
 
-// skipped first 2/3 part of the tests
-
 //#region Page Objects
 const page = {
   toggleAllButton: () => cy.byDataCy('ToggleAllButton'),
